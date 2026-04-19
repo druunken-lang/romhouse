@@ -2,15 +2,13 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ROMHOUSE Management System</title>
-    <!-- React & Babel (JSX 컴파일용) -->
+    <!-- 라이브러리 로드 (가장 안정적인 CDN 버전) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/lucide-react"></script>
     <!-- Firebase SDK -->
@@ -19,257 +17,374 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
-        body { font-family: 'Noto+Sans+KR', sans-serif; }
+        body { 
+            font-family: 'Noto+Sans+KR', sans-serif; 
+            background-color: #e2e8f0; 
+            margin:0; 
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
         .scroll-hide::-webkit-scrollbar { display: none; }
         .scroll-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .active-scale:active { transform: scale(0.95); }
+        .room-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     </style>
 </head>
-<body class="bg-slate-200">
-    <div id="root"></div>
+<body>
+    <div id="root">
+        <div style="display:flex; height:100vh; flex-direction:column; align-items:center; justify-content:center; background:#0f172a; color:white;">
+            <div style="width:40px; height:40px; border:4px solid #f97316; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:20px;"></div>
+            <p style="font-weight:900; letter-spacing:0.2em;">ROMHOUSE SYSTEM LOADING...</p>
+        </div>
+    </div>
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
-        const { 
-            CheckCircle, X, Info, Check, AlertCircle, 
-            CheckSquare, Square, User, FileText, 
-            Waves, TreePine, Flame, Trash2, 
-            Layers, Lightbulb, Wind, Shirt, Package 
-        } = lucideReact;
+        // 즉시 실행 함수로 전체 로직 격리 (Infinity 에러 방지 핵심)
+        (function() {
+            const { useState, useEffect, useMemo, useCallback } = React;
 
-        // 환경 변수 처리 (Canvas 환경 또는 로컬 실행 대응)
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
-            : { /* 로컬 테스트용 설정을 여기에 넣으세요 */ };
-        
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'romhouse-production-v1';
+            // 아이콘 안전 로드 헬퍼
+            const renderIcon = (name, props = {}) => {
+                const lib = window.lucideReact || {};
+                const IconComp = lib[name] || lib['HelpCircle'] || (() => null);
+                return <IconComp {...props} />;
+            };
 
-        // Firebase 초기화 (Compat 모드)
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+            // Firebase 초기화
+            let firebaseConfig = {};
+            try {
+                firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            } catch (e) { console.error("Firebase config fail"); }
+            
+            const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'romhouse-final-stable-v1';
 
-        const App = () => {
-            const [user, setUser] = useState(null);
-            const [rooms, setRooms] = useState([]);
-            const [outdoorTasks, setOutdoorTasks] = useState([]);
-            const [selectedRoomId, setSelectedRoomId] = useState(null);
-            const [message, setMessage] = useState('');
-            const [loading, setLoading] = useState(true);
+            if (!firebase.apps.length && firebaseConfig.apiKey) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            const auth = firebase.auth();
+            const db = firebase.firestore();
 
-            const selectedRoom = rooms.find(r => r.id === selectedRoomId);
+            const App = () => {
+                const [user, setUser] = useState(null);
+                const [rooms, setRooms] = useState([]);
+                const [outdoors, setOutdoors] = useState([]);
+                const [selectedId, setSelectedId] = useState(null);
+                const [toast, setToast] = useState('');
+                const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-            // 1. 인증 로직
-            useEffect(() => {
-                const initAuth = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await auth.signInWithCustomToken(__initial_auth_token);
-                        } else {
-                            await auth.signInAnonymously();
+                const activeRoom = useMemo(() => rooms.find(r => r.id === selectedId), [rooms, selectedId]);
+
+                // 1. 인증 (Rule 3)
+                useEffect(() => {
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await auth.signInWithCustomToken(__initial_auth_token);
+                            } else {
+                                await auth.signInAnonymously();
+                            }
+                        } catch (e) { console.error(e); }
+                    };
+                    initAuth();
+                    return auth.onAuthStateChanged(setUser);
+                }, []);
+
+                // 2. 초기 데이터 템플릿
+                const setupInitialData = useCallback(async () => {
+                    const batch = db.batch();
+                    const roomList = [
+                        { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '1-A', name: 'A룸', floor: 1, doorCode: '1470', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '1-R', name: 'R룸', floor: 1, doorCode: '2580', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '2-O', name: 'O룸', floor: 2, doorCode: '3690', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '2-M', name: 'M룸', floor: 2, doorCode: '1230', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '3-I', name: 'I룸', floor: 3, doorCode: '4560', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
+                        { id: '3-N', name: 'N룸', floor: 3, doorCode: '7890', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } }
+                    ];
+                    const outdoorList = [
+                        { id: 'pool', label: '수영장', checked: false, order: 1, icon: 'Waves' },
+                        { id: 'yard', label: '마당', checked: false, order: 2, icon: 'TreePine' },
+                        { id: 'bbq', label: '바베큐장', checked: false, order: 3, icon: 'Flame' },
+                        { id: 'trash', label: '쓰레기장', checked: false, order: 4, icon: 'Trash2' },
+                        { id: 'stairs', label: '계단청소', checked: false, order: 5, icon: 'Layers' },
+                        { id: 'entrance', label: '현관등', checked: false, order: 6, icon: 'Lightbulb' },
+                        { id: 'dryer', label: '건조기', checked: false, order: 7, icon: 'Wind' },
+                        { id: 'laundry', label: '빨래', checked: false, order: 8, icon: 'Shirt' },
+                        { id: 'supplies', label: '비품', checked: false, order: 9, icon: 'Package' }
+                    ];
+                    const rBase = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('rooms');
+                    const oBase = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('outdoor');
+                    roomList.forEach(r => batch.set(rBase.doc(r.id), r));
+                    outdoorList.forEach(o => batch.set(oBase.doc(o.id), o));
+                    await batch.commit();
+                }, [db]);
+
+                // 3. 실시간 리스너 (Rule 1)
+                useEffect(() => {
+                    if (!user) return;
+                    const rPath = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('rooms');
+                    const oPath = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('outdoor');
+
+                    const unsubR = rPath.onSnapshot(s => {
+                        const data = s.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        if (data.length === 0) setupInitialData();
+                        else {
+                            setRooms(data);
+                            setIsInitialLoad(false);
                         }
-                    } catch (err) {
-                        console.error("인증 에러:", err);
-                    }
+                    }, e => console.error("Snapshot Error", e));
+
+                    const unsubO = oPath.onSnapshot(s => {
+                        setOutdoors(s.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                    });
+
+                    return () => { unsubR(); unsubO(); };
+                }, [user, setupInitialData]);
+
+                const updateRemote = async (col, id, fields) => {
+                    try {
+                        await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(col).doc(id).update(fields);
+                    } catch (e) { console.error("Update Fail", e); }
                 };
-                initAuth();
-                const unsubscribe = auth.onAuthStateChanged(setUser);
-                return () => unsubscribe();
-            }, []);
 
-            // 2. 실시간 데이터 구독
-            useEffect(() => {
-                if (!user) return;
+                const getRoomStyle = (status) => {
+                    if (status === '입실') return 'bg-emerald-600 text-white shadow-xl';
+                    if (status === '연박') return 'bg-slate-400 text-white shadow-xl'; // 먹 40% 회색
+                    return 'bg-white text-slate-500 border-2 border-slate-200 shadow-sm';
+                };
 
-                const roomsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms');
-                const unsubRooms = roomsRef.onSnapshot((snapshot) => {
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    if (data.length === 0) initializeRooms();
-                    else {
-                        setRooms(data);
-                        setLoading(false);
-                    }
-                });
-
-                const outdoorRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('outdoor');
-                const unsubOutdoor = outdoorRef.onSnapshot((snapshot) => {
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    if (data.length === 0) initializeOutdoor();
-                    else setOutdoorTasks(data);
-                });
-
-                return () => { unsubRooms(); unsubOutdoor(); };
-            }, [user]);
-
-            const initializeRooms = async () => {
-                const init = [
-                    { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '1-A', name: 'A룸', floor: 1, doorCode: '1470', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '1-R', name: 'R룸', floor: 1, doorCode: '2580', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '2-O', name: 'O룸', floor: 2, doorCode: '3690', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '2-M', name: 'M룸', floor: 2, doorCode: '1230', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '3-I', name: 'I룸', floor: 3, doorCode: '4560', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                    { id: '3-N', name: 'N룸', floor: 3, doorCode: '7890', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } }
-                ];
-                const roomsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms');
-                for (const r of init) { await roomsRef.doc(r.id).set(r); }
-            };
-
-            const initializeOutdoor = async () => {
-                const init = [
-                    { id: 'pool', label: '수영장', checked: false, order: 1 }, { id: 'yard', label: '마당', checked: false, order: 2 },
-                    { id: 'bbq', label: '바베큐장', checked: false, order: 3 }, { id: 'trash', label: '쓰레기장', checked: false, order: 4 },
-                    { id: 'stairs', label: '계단청소', checked: false, order: 5 }, { id: 'entrance', label: '현관등', checked: false, order: 6 },
-                    { id: 'dryer', label: '건조기', checked: false, order: 7 }, { id: 'laundry', label: '빨래', checked: false, order: 8 },
-                    { id: 'supplies', label: '비품', checked: false, order: 9 }
-                ];
-                const outdoorRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('outdoor');
-                for (const t of init) { await outdoorRef.doc(t.id).set(t); }
-            };
-
-            const updateRoomData = async (id, fields) => {
-                const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(id);
-                await docRef.update(fields);
-            };
-
-            const getStatusStyle = (status) => {
-                switch (status) {
-                    case '입실': return 'bg-emerald-600 text-white border-emerald-700 shadow-xl';
-                    case '연박': return 'bg-slate-400 text-white border-slate-500 shadow-xl'; 
-                    default: return 'bg-white text-slate-500 border-slate-300 shadow-lg';
-                }
-            };
-
-            const RoomCard = ({ room }) => {
-                const complete = Object.values(room.checklist || {}).every(v => v === true);
-                const hasMemo = room.memo && room.memo.trim().length > 0;
-                
-                return (
-                    <div onClick={() => setSelectedRoomId(room.id)} className={`relative flex flex-col items-center justify-start py-5 w-32 h-72 sm:w-36 sm:h-80 rounded-[32px] border-b-8 transition-all duration-300 ${getStatusStyle(room.status)} active:scale-95 cursor-pointer hover:brightness-105 hover:-translate-y-2`}>
-                        <span className="text-3xl font-black tracking-tighter mb-1 uppercase leading-none drop-shadow-md">{room.name}</span>
-                        <div className={`text-2xl font-black tracking-widest px-4 py-1.5 rounded-2xl mb-2 shadow-inner ${room.status === '공실' ? 'text-slate-900 bg-slate-100' : 'text-white bg-black/30'}`}>{room.doorCode}</div>
-                        <span className={`text-base font-black mb-2 truncate w-full px-2 text-center ${room.status === '공실' ? 'text-slate-400 italic' : 'text-white'}`}>{room.guestName || "예약자 없음"}</span>
-                        <div className={`flex items-center gap-1.5 text-[11px] font-black mb-2 px-3 py-1 rounded-full shadow-md ${complete ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-amber-900'}`}>
-                            {complete ? <Check size={12} strokeWidth={4} /> : <AlertCircle size={12} />} {complete ? "점검완료" : "점검중"}
-                        </div>
-                        {hasMemo && <div className="flex items-center gap-1.5 text-[11px] font-black mb-2 px-3 py-1 rounded-full shadow-md bg-purple-600 text-white"><FileText size={12} /> 메모 있음</div>}
-                        <span className={`text-sm font-black uppercase tracking-[0.2em] mt-auto mb-4 px-4 py-1.5 rounded-xl shadow-lg ${room.status === '공실' ? 'bg-slate-200 text-slate-600 border border-slate-300' : 'bg-black/20 text-white'}`}>{room.status}</span>
-                        <div className="w-full px-3 flex justify-center gap-3 pt-3 border-t border-black/10 mt-auto mb-2">
-                            {['terrace', 'window'].map(field => (
-                                <div key={field} onClick={(e) => { e.stopPropagation(); updateRoomData(room.id, { [`quickChecks.${field}`]: !room.quickChecks[field] }); }} className={`flex flex-col items-center gap-1 transition-all ${room.quickChecks[field] ? 'opacity-100' : 'opacity-40'}`}>
-                                    <CheckSquare size={18} className={room.quickChecks[field] ? (room.status === '공실' ? "text-emerald-600" : "text-yellow-300") : ""} />
-                                    <span className="text-[10px] font-black uppercase">{field === 'terrace' ? '테라스' : '유리창'}</span>
+                const RoomCard = ({ room }) => {
+                    const isAllChecked = Object.values(room.checklist || {}).every(v => v === true);
+                    const hasMemo = room.memo && room.memo.trim().length > 0;
+                    
+                    return (
+                        <div 
+                            onClick={() => setSelectedId(room.id)} 
+                            className={`room-card relative flex flex-col items-center py-6 w-32 h-80 sm:w-40 sm:h-88 rounded-[44px] border-b-8 active-scale ${getRoomStyle(room.status)} cursor-pointer hover:brightness-105 hover:-translate-y-1`}
+                        >
+                            {/* 1. 방 이름 (최상단, 거대 폰트) */}
+                            <span className="text-4xl font-black mb-1 tracking-tighter uppercase">{room.name}</span>
+                            
+                            {/* 2. 비밀번호 (큼직하게) */}
+                            <div className={`text-2xl font-black px-4 py-1 rounded-2xl mb-3 shadow-inner ${room.status==='공실'?'bg-slate-100 text-slate-800':'bg-black/20 text-white'}`}>
+                                {room.doorCode}
+                            </div>
+                            
+                            {/* 3. 예약자명 */}
+                            <span className={`text-lg font-black mb-3 truncate px-3 text-center w-full ${room.status==='공실'?'text-slate-300 italic':'text-white'}`}>
+                                {room.guestName || (room.status==='공실'?"":"예약자 정보없음")}
+                            </span>
+                            
+                            {/* 4. 점검 & 메모 상태 */}
+                            <div className="flex flex-col gap-1.5 mb-4 items-center">
+                                <div className={`flex items-center gap-1 text-[11px] font-black px-3 py-1 rounded-full shadow-sm ${isAllChecked?'bg-emerald-500 text-white':'bg-orange-500 text-white'}`}>
+                                    {renderIcon(isAllChecked?'CheckCircle':'AlertCircle', {size:12})} {isAllChecked?'점검완료':'점검중'}
                                 </div>
-                            ))}
+                                {hasMemo && (
+                                    <div className="flex items-center gap-1 text-[11px] font-black px-3 py-1 rounded-full bg-purple-600 text-white shadow-sm animate-pulse">
+                                        {renderIcon('FileText', {size:12})} 메모 있음
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 6. 방 상태 (최하단 고정 위) */}
+                            <span className={`text-sm font-black uppercase tracking-[0.2em] mt-auto mb-4 px-4 py-1 rounded-xl bg-black/10 border border-white/10`}>
+                                {room.status}
+                            </span>
+
+                            {/* 하단 퀵 체크 (테라스, 유리창) */}
+                            <div className="w-full px-4 flex justify-center gap-5 pt-4 border-t border-black/5 mt-auto mb-1">
+                                {['terrace', 'window'].map(q => (
+                                    <div 
+                                        key={q} 
+                                        onClick={e => {e.stopPropagation(); updateRemote('rooms', room.id, {[`quickChecks.${q}`]: !room.quickChecks[q]});}} 
+                                        className={`flex flex-col items-center gap-1 transition-all ${room.quickChecks?.[q]?'opacity-100 scale-110':'opacity-30'}`}
+                                    >
+                                        {renderIcon('CheckSquare', {size:22, className: room.quickChecks?.[q]?(room.status==='공실'?'text-emerald-600':'text-yellow-300'):''})}
+                                        <span className="text-[10px] font-black">{q==='terrace'?'테라스':'유리창'}</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {room.status !== '공실' && (
+                                <div className="absolute top-5 right-5 w-3 h-3 bg-white rounded-full animate-pulse shadow-lg" />
+                            )}
                         </div>
+                    );
+                };
+
+                if (isInitialLoad) return (
+                    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-6">
+                        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-6 shadow-[0_0_20px_rgba(249,115,22,0.4)]"></div>
+                        <h1 className="text-3xl font-black tracking-widest uppercase mb-2">ROMHOUSE</h1>
+                        <p className="text-slate-400 font-bold animate-pulse tracking-widest uppercase">Syncing Database...</p>
+                    </div>
+                );
+
+                return (
+                    <div className="min-h-screen flex flex-col bg-slate-200">
+                        {/* 고정 헤더 */}
+                        <header className="bg-slate-800 px-6 py-8 text-center shadow-2xl border-b border-slate-700 shrink-0">
+                            <h1 className="text-5xl font-black text-white tracking-tighter leading-none mb-1">ROMHOUSE</h1>
+                            <p className="text-[12px] text-slate-400 font-bold uppercase tracking-[0.5em]">Premium Resort Management</p>
+                        </header>
+
+                        {/* 메인 스크롤 구역 */}
+                        <main className="flex-1 p-4 flex flex-col gap-16 max-w-5xl mx-auto w-full pb-48 pt-10 scroll-hide overflow-y-auto scroll-smooth">
+                            {[1, 2, 3].map(lvl => (
+                                <section key={lvl} className="space-y-8 animate-in fade-in">
+                                    <div className="flex items-center gap-6 px-4">
+                                        <span className="bg-slate-900 text-white text-sm px-6 py-2 rounded-2xl font-black shadow-2xl tracking-[0.3em] border-b-4 border-slate-700">{lvl}F UNITS</span>
+                                        <div className="h-[4px] flex-1 bg-slate-300 rounded-full shadow-inner"></div>
+                                    </div>
+                                    <div className="flex justify-center flex-wrap gap-8">
+                                        {rooms.filter(r => r.floor === lvl).sort((a,b)=>a.id.localeCompare(b.id)).map(room => (
+                                            <RoomCard key={room.id} room={room} />
+                                        ))}
+                                    </div>
+                                </section>
+                            ))}
+
+                            {/* 야외 시설 점검 (전용 오렌지 테마) */}
+                            <section className="bg-orange-500 rounded-[64px] p-10 shadow-[0_30px_60px_-12px_rgba(249,115,22,0.3)] border-b-[16px] border-orange-700 relative overflow-hidden ring-8 ring-white/20">
+                                <div className="absolute top-0 right-0 p-32 bg-white/10 rounded-full -mr-20 -mt-20"></div>
+                                <div className="flex items-center gap-5 mb-10 relative z-10">
+                                    <span className="bg-white text-orange-600 text-xs px-8 py-2.5 rounded-full font-black uppercase tracking-[0.3em] shadow-xl">Outdoor Checklist</span>
+                                    <div className="h-[4px] flex-1 bg-white/30 rounded-full shadow-inner"></div>
+                                </div>
+                                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-6 relative z-10">
+                                    {outdoors.sort((a,b)=>a.order-b.order).map(task => (
+                                        <button 
+                                            key={task.id} 
+                                            onClick={() => updateRemote('outdoor', task.id, {checked: !task.checked})} 
+                                            className={`flex flex-col items-center justify-center p-6 rounded-[40px] transition-all active-scale border-4 shadow-xl ${task.checked?'bg-white text-orange-600 border-white scale-105':'bg-orange-600 text-orange-100 border-orange-400'}`}
+                                        >
+                                            <div className={`p-4 rounded-[28px] mb-3 shadow-lg ${task.checked?'bg-orange-100':'bg-orange-700'}`}>
+                                                {renderIcon(task.icon||'Package', {size:32})}
+                                            </div>
+                                            <span className="text-lg font-black tracking-tighter uppercase leading-none">{task.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </section>
+                        </main>
+
+                        {/* 관리 모달 (고해상도 인터페이스) */}
+                        {activeRoom && (
+                            <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-3xl z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-300">
+                                <div className="bg-white w-full max-w-xl rounded-[72px] p-10 shadow-2xl border-t-[16px] border-slate-900 max-h-[92vh] overflow-y-auto scroll-hide relative">
+                                    <div className="flex justify-between items-start mb-12">
+                                        <div>
+                                            <h2 className="text-7xl font-black text-slate-900 tracking-tighter leading-none mb-4">{activeRoom.name}</h2>
+                                            <div className="inline-flex items-center gap-3 bg-blue-700 text-white px-8 py-3 rounded-[32px] font-black text-3xl shadow-2xl border-b-4 border-blue-900">
+                                                {renderIcon('Lock', {size:28})} {activeRoom.doorCode}
+                                            </div>
+                                        </div>
+                                        <button onClick={()=>setSelectedId(null)} className="p-5 bg-slate-100 hover:bg-slate-200 rounded-full transition-all active-scale shadow-sm">
+                                            {renderIcon('X', {size:44, className:'text-slate-500'})}
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-12">
+                                        {/* 예약자명 */}
+                                        <section className="space-y-5">
+                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest flex items-center gap-4 px-2">{renderIcon('User', {size:24})} 예약자 성함</h3>
+                                            <input 
+                                                type="text" 
+                                                value={activeRoom.guestName||''} 
+                                                onChange={e=>updateRemote('rooms', activeRoom.id, {guestName: e.target.value})} 
+                                                className="w-full bg-slate-50 border-4 border-slate-100 rounded-[44px] px-10 py-7 text-4xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner transition-all" 
+                                                placeholder="성함을 입력하세요" 
+                                            />
+                                        </section>
+
+                                        {/* 투숙 상태 */}
+                                        <section className="space-y-6">
+                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest flex items-center gap-4 px-2">{renderIcon('Info', {size:24})} 현재 투숙 상태</h3>
+                                            <div className="grid grid-cols-3 gap-4 bg-slate-100 p-3 rounded-[48px]">
+                                                {['입실','연박','공실'].map(s => (
+                                                    <button 
+                                                        key={s} 
+                                                        onClick={()=>updateRemote('rooms', activeRoom.id, {status:s})} 
+                                                        className={`py-6 rounded-[36px] font-black text-2xl transition-all shadow-md active-scale ${activeRoom.status===s?'bg-white text-slate-900 shadow-2xl scale-105 z-10':'text-slate-400'}`}
+                                                    >
+                                                        {s}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </section>
+
+                                        {/* 정밀 체크리스트 */}
+                                        <section className="space-y-6">
+                                            <div className="flex justify-between items-end px-2">
+                                                <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest">실내 시설 점검</h3>
+                                                <button 
+                                                    onClick={()=>{const n={}; Object.keys(activeRoom.checklist).forEach(k=>n[k]=true); updateRemote('rooms', activeRoom.id, {checklist:n});}} 
+                                                    className="text-[13px] font-black bg-emerald-100 text-emerald-700 px-6 py-2.5 rounded-[24px] shadow-sm active-scale"
+                                                >
+                                                    전체 체크
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-5">
+                                                {Object.entries(activeRoom.checklist||{}).map(([k,v]) => (
+                                                    <button 
+                                                        key={k} 
+                                                        onClick={()=>updateRemote('rooms', activeRoom.id, {[`checklist.${k}`]:!v})} 
+                                                        className={`flex items-center gap-6 p-6 rounded-[40px] border-4 transition-all text-left active-scale ${v?'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-lg scale-[1.02]':'bg-slate-50 border-slate-100 text-slate-300'}`}
+                                                    >
+                                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-4 transition-all ${v?'bg-emerald-600 border-emerald-600 shadow-lg':'bg-white border-slate-200'}`}>
+                                                            {v && renderIcon('Check', {size:24, className:'text-white', strokeWidth:6})}
+                                                        </div>
+                                                        <span className="text-xl font-black">
+                                                            {{utensils:'집기류', lights:'조명', bathroom:'화장실', floor:'바닥청소', terrace:'테라스', tv:'TV', mosquito:'모기향', aircon:'에어컨', plants:'화분', boiler:'보일러'}[k]||k}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </section>
+
+                                        {/* 영구 메모장 */}
+                                        <section className="space-y-5 pb-12">
+                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest flex items-center gap-4 px-2">{renderIcon('FileText', {size:24})} 관리 메모 (영구보관)</h3>
+                                            <textarea 
+                                                value={activeRoom.memo||''} 
+                                                onChange={e=>updateRemote('rooms', activeRoom.id, {memo: e.target.value})} 
+                                                rows="5" 
+                                                className="w-full bg-slate-50 border-4 border-slate-100 rounded-[44px] px-10 py-8 text-2xl font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-inner resize-none transition-all" 
+                                                placeholder="특이사항을 입력하세요." 
+                                            />
+                                        </section>
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={()=>setSelectedId(null)} 
+                                        className="w-full mt-4 py-8 bg-slate-900 text-white rounded-[44px] font-black text-3xl tracking-[0.4em] uppercase shadow-[0_20px_50px_rgba(0,0,0,0.4)] active-scale border-b-8 border-black hover:bg-slate-800 transition-all"
+                                    >
+                                        관리 완료
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* 플로팅 알림 (토스트) */}
+                        {toast && (
+                            <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white px-12 py-6 rounded-[36px] text-xl font-black shadow-2xl animate-in fade-in zoom-in flex items-center gap-6 border-2 border-slate-700 border-b-8">
+                                {renderIcon('CheckCircle', {size:36, className:'text-emerald-400'})} 
+                                {toast}
+                            </div>
+                        )}
                     </div>
                 );
             };
 
-            if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white font-black tracking-widest uppercase animate-pulse">ROMHOUSE Loading...</div>;
-
-            return (
-                <div className="min-h-screen flex flex-col overflow-hidden">
-                    <header className="bg-slate-800 px-6 py-6 flex flex-col items-center shrink-0 z-10 shadow-2xl border-b border-slate-800">
-                        <h1 className="text-4xl font-black tracking-tighter text-white leading-tight">ROMHOUSE</h1>
-                        <p className="text-[12px] font-bold text-slate-500 uppercase tracking-[0.4em] mt-1">Premium Resort Management</p>
-                    </header>
-
-                    <main className="flex-1 p-4 flex flex-col gap-12 max-w-3xl mx-auto w-full overflow-y-auto scroll-hide pb-32 pt-10 scroll-smooth">
-                        {[1, 2, 3].map(floor => (
-                            <section key={floor} className="space-y-8 animate-in fade-in duration-700">
-                                <div className="flex items-center gap-5 px-3">
-                                    <span className="bg-slate-900 text-white text-sm px-5 py-2 rounded-2xl font-black shadow-2xl tracking-[0.2em] border border-slate-700">{floor}F</span>
-                                    <div className="h-[4px] flex-1 bg-slate-300 rounded-full shadow-inner"></div>
-                                </div>
-                                <div className="flex justify-center flex-wrap gap-6">
-                                    {rooms.filter(r => r.floor === floor).sort((a,b) => a.id.localeCompare(b.id)).map(room => <RoomCard key={room.id} room={room} />)}
-                                </div>
-                            </section>
-                        ))}
-
-                        <section className="bg-orange-100/90 rounded-[50px] p-10 border-4 border-orange-200 shadow-2xl mt-10 relative overflow-hidden ring-8 ring-white/40">
-                            <div className="flex items-center gap-5 mb-10 relative z-10">
-                                <span className="bg-orange-700 text-white text-xs px-6 py-2.5 rounded-2xl font-black uppercase">Outdoor Area</span>
-                                <div className="h-[5px] flex-1 bg-orange-300 rounded-full shadow-inner"></div>
-                            </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5 relative z-10">
-                                {outdoorTasks.sort((a,b) => a.order - b.order).map(task => (
-                                    <button key={task.id} onClick={async () => { await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('outdoor').doc(task.id).update({ checked: !task.checked }); }} className={`flex flex-col items-center justify-center p-6 rounded-[40px] border-4 transition-all gap-5 active:scale-90 ${task.checked ? 'bg-orange-600 border-orange-800 text-white shadow-xl scale-105 z-20' : 'bg-white border-white text-slate-500 hover:border-orange-200 shadow-xl'}`}>
-                                        <div className={`p-5 rounded-[28px] shadow-lg ${task.checked ? 'bg-white text-orange-600' : 'bg-slate-100'}`}>
-                                            {task.id === 'pool' && <Waves size={24} />} {task.id === 'yard' && <TreePine size={24} />} {task.id === 'bbq' && <Flame size={24} />}
-                                            {task.id === 'trash' && <Trash2 size={24} />} {task.id === 'stairs' && <Layers size={24} />} {task.id === 'entrance' && <Lightbulb size={24} />}
-                                            {task.id === 'dryer' && <Wind size={24} />} {task.id === 'laundry' && <Shirt size={24} />} {task.id === 'supplies' && <Package size={24} />}
-                                        </div>
-                                        <span className="text-lg font-black tracking-tighter uppercase leading-none">{task.label}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </section>
-                    </main>
-
-                    {selectedRoom && (
-                        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl z-50 flex items-end sm:items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-lg rounded-[60px] p-10 shadow-2xl animate-in slide-in-from-bottom duration-500 max-h-[92vh] overflow-y-auto border-t-[12px] border-slate-900 scroll-hide">
-                                <div className="flex justify-between items-start mb-10">
-                                    <div>
-                                        <p className="text-[13px] font-black text-slate-400 uppercase mb-3">{selectedRoom.floor}F UNIT</p>
-                                        <h2 className="text-6xl font-black text-slate-900 leading-none tracking-tighter mb-4">{selectedRoom.name}</h2>
-                                        <div className="bg-blue-700 text-white px-6 py-2.5 rounded-[24px] font-black text-2xl shadow-xl inline-block">CODE: {selectedRoom.doorCode}</div>
-                                    </div>
-                                    <button onClick={() => setSelectedRoomId(null)} className="p-4 bg-slate-100 hover:bg-slate-200 rounded-full transition-all active:scale-90"><X size={36} className="text-slate-500" /></button>
-                                </div>
-                                <div className="mb-10 space-y-8">
-                                    <section>
-                                        <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-3"><User size={20} className="text-slate-400" /> 예약자 성함</h3>
-                                        <input type="text" value={selectedRoom.guestName || ''} onChange={(e) => updateRoomData(selectedRoom.id, { guestName: e.target.value })} className="w-full bg-slate-100 border-4 border-slate-100 rounded-[32px] px-8 py-5 text-3xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner" placeholder="성함 입력" />
-                                    </section>
-                                    <section>
-                                        <h3 className="text-sm font-black text-slate-500 mb-5 flex items-center gap-3"><Info size={20} className="text-slate-400" /> 투숙 상태</h3>
-                                        <div className="grid grid-cols-3 bg-slate-100 p-2.5 rounded-[36px] gap-3">
-                                            {['입실', '연박', '공실'].map(s => (
-                                                <button key={s} onClick={() => updateRoomData(selectedRoom.id, { status: s })} className={`flex items-center justify-center gap-3 py-5 rounded-[28px] font-black text-xl transition-all ${selectedRoom.status === s ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400'}`}>
-                                                    <div className={`w-5 h-5 rounded-full border-4 ${selectedRoom.status === s ? (s === '연박' ? 'bg-slate-400 border-slate-400' : 'bg-blue-600 border-blue-600') : 'bg-transparent border-slate-300'}`} /> {s}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </section>
-                                    <section>
-                                        <div className="flex justify-between items-end mb-5">
-                                            <h3 className="text-sm font-black text-slate-500">시설 점검</h3>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => {
-                                                    const newCheck = {}; Object.keys(selectedRoom.checklist).forEach(k => newCheck[k] = true);
-                                                    updateRoomData(selectedRoom.id, { checklist: newCheck });
-                                                }} className="text-[12px] font-black text-emerald-700 bg-emerald-100 px-4 py-2 rounded-2xl">전체 체크</button>
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            {Object.entries(selectedRoom.checklist || {}).map(([key, val]) => (
-                                                <button key={key} onClick={() => updateRoomData(selectedRoom.id, { [`checklist.${key}`]: !val })} className={`flex items-center gap-5 p-5 rounded-[30px] border-4 transition-all text-left ${val ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-md' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
-                                                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center border-4 ${val ? 'bg-emerald-600 border-emerald-600 shadow-lg' : 'bg-white border-slate-200'}`}>{val && <Check size={20} strokeWidth={5} color="white" />}</div>
-                                                    <span className="text-[18px] font-black">{ {utensils:'집기류', lights:'조명', bathroom:'화장실', floor:'바닥청소', terrace:'테라스', tv:'TV', mosquito:'모기향', aircon:'에어컨', plants:'화분', boiler:'보일러'}[key] }</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </section>
-                                    <section>
-                                        <h3 className="text-sm font-black text-slate-500 uppercase mb-4 flex items-center gap-3"><FileText size={20} className="text-slate-400" /> 관리 메모</h3>
-                                        <textarea value={selectedRoom.memo || ''} onChange={(e) => updateRoomData(selectedRoom.id, { memo: e.target.value })} rows="4" className="w-full bg-slate-100 border-4 border-slate-100 rounded-[36px] px-8 py-6 text-lg font-bold text-slate-900 focus:outline-none focus:border-purple-600 shadow-inner resize-none" placeholder="메모 입력" />
-                                    </section>
-                                </div>
-                                <button onClick={() => setSelectedRoomId(null)} className="w-full py-7 bg-slate-900 text-white rounded-[32px] font-black text-2xl tracking-[0.4em] uppercase shadow-2xl active:scale-95 border-b-8 border-black">저장 완료</button>
-                            </div>
-                        </div>
-                    )}
-                    {message && <div className="fixed top-28 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white px-8 py-4 rounded-3xl text-base font-black shadow-2xl animate-in fade-in zoom-in duration-300 flex items-center gap-3 border-2 border-slate-700"><CheckCircle size={24} className="text-emerald-400" />{message}</div>}
-                </div>
-            );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+            // React 루트 렌더링
+            const rootNode = document.getElementById('root');
+            if (rootNode) {
+                const reactRoot = ReactDOM.createRoot(rootNode);
+                reactRoot.render(<App />);
+            }
+        })();
     </script>
 </body>
 </html>
