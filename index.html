@@ -11,6 +11,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/lucide-react"></script>
+    <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -43,17 +44,27 @@
     <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
 
     <script type="text/babel">
-        // Infinity 재선언 오류 방지를 위해 전체 로직을 즉시 실행 함수 내부에 배치
         (function() {
             const { useState, useEffect, useMemo, useCallback } = React;
 
-            // 아이콘 안전 로딩용 헬퍼
             const getIcon = (name) => {
                 const lib = window.lucideReact || {};
                 return lib[name] || lib['HelpCircle'] || (() => null);
             };
 
-            // 기본 데이터
+            const CHECKLIST_KEYS = [
+                { key: 'utensils', label: '집기류' },
+                { key: 'lights', label: '조명' },
+                { key: 'bathroom', label: '화장실' },
+                { key: 'floor', label: '바닥청소' },
+                { key: 'terrace', label: '테라스' },
+                { key: 'tv', label: 'TV' },
+                { key: 'mosquito', label: '모기향' },
+                { key: 'aircon', label: '에어컨' },
+                { key: 'plants', label: '화분' },
+                { key: 'boiler', label: '보일러' }
+            ];
+
             const INITIAL_ROOM_STATE = [
                 { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
                 { id: '1-A', name: 'A룸', floor: 1, doorCode: '1470', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
@@ -76,10 +87,9 @@
                 { id: 'supplies', label: '비품', checked: false, order: 9, icon: 'Package' }
             ];
 
-            // Firebase 초기화
             let fbConfig = null;
             try { fbConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null; } catch (e) {}
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'romhouse-final-stable-v2';
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'romhouse-final-stable-v3';
 
             if (fbConfig && fbConfig.apiKey && !firebase.apps.length) {
                 firebase.initializeApp(fbConfig);
@@ -96,9 +106,8 @@
 
                 const activeRoom = useMemo(() => rooms.find(r => r.id === selId), [rooms, selId]);
 
-                // 1. 인증 및 타임아웃
                 useEffect(() => {
-                    const timer = setTimeout(() => setLoading(false), 3000); // 3초 타임아웃 (로딩 멈춤 방지)
+                    const timer = setTimeout(() => setLoading(false), 3000);
                     if (!auth) { setLoading(false); return; }
                     const initAuth = async () => {
                         try {
@@ -114,7 +123,6 @@
                     return () => { unsubAuth(); clearTimeout(timer); };
                 }, []);
 
-                // 2. 실시간 데이터 동기화
                 useEffect(() => {
                     if (!user || !db) return;
                     const rRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms');
@@ -140,7 +148,15 @@
                 }, [user]);
 
                 const updateDb = async (col, id, fields) => {
-                    // 낙관적 업데이트
+                    // 공실 전환 시 점검 항목 초기화 로직 (메모 제외)
+                    if (col === 'rooms' && fields.status === '공실') {
+                        const resetChecklist = {};
+                        CHECKLIST_KEYS.forEach(item => resetChecklist[item.key] = false);
+                        fields.checklist = resetChecklist;
+                        fields.quickChecks = { terrace: false, window: false };
+                        fields.guestName = ""; // 예약자명도 공실 시 비움
+                    }
+
                     if (col === 'rooms') setRooms(p => p.map(r => r.id === id ? { ...r, ...fields } : r));
                     else setOutdoors(p => p.map(o => o.id === id ? { ...o, ...fields } : o));
 
@@ -152,41 +168,42 @@
 
                 const getBg = (s) => {
                     if (s === '입실') return 'bg-emerald-600 text-white shadow-xl';
-                    if (s === '연박') return 'bg-slate-400 text-white shadow-xl'; // 먹 40%
+                    if (s === '연박') return 'bg-slate-400 text-white shadow-xl'; 
                     return 'bg-white text-slate-500 border-2 border-slate-200 shadow-sm';
                 };
 
                 const RoomCard = ({ room }) => {
                     const done = Object.values(room.checklist || {}).every(v => v === true);
+                    const hasMemo = room.memo && room.memo.trim().length > 0;
                     const CheckIcon = getIcon('CheckCircle');
                     const AlertIcon = getIcon('AlertCircle');
                     const FileIcon = getIcon('FileText');
                     const CheckSquareIcon = getIcon('CheckSquare');
 
                     return (
-                        <div onClick={() => setSelId(room.id)} className={`relative flex flex-col items-center py-6 w-32 h-80 sm:w-40 sm:h-88 rounded-[44px] border-b-8 active-scale ${getBg(room.status)} cursor-pointer hover:brightness-105 hover:-translate-y-1 fade-in`}>
-                            <span className="text-4xl font-black mb-1 tracking-tighter uppercase">{room.name}</span>
-                            <div className={`text-2xl font-black px-4 py-1 rounded-2xl mb-3 shadow-inner ${room.status==='공실'?'bg-slate-100 text-slate-800':'bg-black/20 text-white'}`}>{room.doorCode}</div>
-                            <span className={`text-lg font-black mb-3 truncate px-3 text-center w-full ${room.status==='공실'?'text-slate-300 italic':'text-white'}`}>{room.guestName || (room.status==='공실'?"":"예약자 없음")}</span>
+                        <div onClick={() => setSelId(room.id)} className={`relative flex flex-col items-center py-5 w-32 h-72 sm:w-36 sm:h-80 rounded-[36px] border-b-8 active-scale ${getBg(room.status)} cursor-pointer hover:brightness-105 hover:-translate-y-1 fade-in`}>
+                            <span className="text-3xl font-black mb-1 tracking-tighter uppercase">{room.name}</span>
+                            <div className={`text-2xl font-black px-3 py-0.5 rounded-xl mb-2 shadow-inner ${room.status==='공실'?'bg-slate-100 text-slate-800':'bg-black/20 text-white'}`}>{room.doorCode}</div>
+                            <span className={`text-sm font-black mb-2 truncate px-2 text-center w-full ${room.status==='공실'?'text-slate-300 italic':'text-white'}`}>{room.guestName || (room.status==='공실'?"":"정보 없음")}</span>
                             
-                            <div className="flex flex-col gap-1.5 mb-4 items-center">
-                                <div className={`flex items-center gap-1 text-[10px] font-black px-3 py-1 rounded-full ${done?'bg-emerald-500 text-white':'bg-orange-500 text-white'}`}>
-                                    <CheckIcon size={12} /> {done?'점검완료':'점검중'}
+                            <div className="flex flex-col gap-1 mb-2 items-center">
+                                <div className={`flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full ${done?'bg-emerald-500 text-white':'bg-orange-500 text-white'}`}>
+                                    <CheckIcon size={10} /> {done?'점검완료':'점검중'}
                                 </div>
-                                {room.memo && (
-                                    <div className="flex items-center gap-1 text-[11px] font-black px-3 py-1 rounded-full bg-purple-600 text-white shadow-sm">
-                                        <FileIcon size={12} /> 메모 있음
+                                {hasMemo && (
+                                    <div className="flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-600 text-white shadow-sm">
+                                        <FileIcon size={10} /> 메모 있음
                                     </div>
                                 )}
                             </div>
 
-                            <span className={`text-sm font-black uppercase tracking-[0.2em] mt-auto mb-4 px-4 py-1 rounded-xl bg-black/10 border border-white/10`}>{room.status}</span>
+                            <span className={`text-[11px] font-black uppercase tracking-[0.2em] mt-auto mb-3 px-3 py-1 rounded-lg bg-black/10`}>{room.status}</span>
 
-                            <div className="w-full px-4 flex justify-center gap-5 pt-4 border-t border-black/5 mt-auto mb-1">
+                            <div className="w-full px-3 flex justify-center gap-4 pt-3 border-t border-black/5 mt-auto mb-1">
                                 {['terrace', 'window'].map(q => (
-                                    <div key={q} onClick={e => {e.stopPropagation(); updateDb('rooms', room.id, {[`quickChecks.${q}`]: !room.quickChecks[q]});}} className={`flex flex-col items-center gap-1 ${room.quickChecks?.[q]?'opacity-100 scale-110':'opacity-30'}`}>
-                                        <CheckSquareIcon size={22} className={room.quickChecks?.[q]?(room.status==='공실'?'text-emerald-600':'text-yellow-300'):''} />
-                                        <span className="text-[10px] font-black">{q==='terrace'?'테라스':'유리창'}</span>
+                                    <div key={q} onClick={e => {e.stopPropagation(); updateDb('rooms', room.id, {[`quickChecks.${q}`]: !room.quickChecks[q]});}} className={`flex flex-col items-center gap-0.5 ${room.quickChecks?.[q]?'opacity-100 scale-110':'opacity-30'}`}>
+                                        <CheckSquareIcon size={18} className={room.quickChecks?.[q]?(room.status==='공실'?'text-emerald-600':'text-yellow-300'):''} />
+                                        <span className="text-[9px] font-black">{q==='terrace'?'테라스':'유리창'}</span>
                                     </div>
                                 ))}
                             </div>
@@ -197,26 +214,26 @@
                 if (loading) return (
                     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
                         <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                        <h1 className="text-3xl font-black tracking-widest uppercase mb-2">ROMHOUSE</h1>
+                        <h1 className="text-2xl font-black tracking-widest uppercase mb-2">ROMHOUSE</h1>
                         <p className="text-slate-400 font-bold animate-pulse tracking-widest">CONNECTING...</p>
                     </div>
                 );
 
                 return (
-                    <div className="min-h-screen flex flex-col bg-slate-200">
-                        <header className="bg-slate-800 px-6 py-8 text-center shadow-2xl border-b border-slate-700 shrink-0">
-                            <h1 className="text-5xl font-black text-white tracking-tighter leading-none mb-1">ROMHOUSE</h1>
-                            <p className="text-[12px] text-slate-400 font-bold uppercase tracking-[0.5em]">Premium Resort Management</p>
+                    <div className="min-h-screen flex flex-col bg-slate-200 overflow-x-hidden">
+                        <header className="bg-slate-800 px-4 py-6 text-center shadow-xl border-b border-slate-700 shrink-0">
+                            <h1 className="text-4xl font-black text-white tracking-tighter mb-1">ROMHOUSE</h1>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.4em]">Resort Management</p>
                         </header>
 
-                        <main className="flex-1 p-4 flex flex-col gap-16 max-w-5xl mx-auto w-full pb-48 pt-10 scroll-hide overflow-y-auto scroll-smooth">
+                        <main className="flex-1 p-2 flex flex-col gap-6 max-w-4xl mx-auto w-full pb-32 pt-6 scroll-hide overflow-y-auto">
                             {[1, 2, 3].map(floor => (
-                                <section key={floor} className="space-y-8 animate-in fade-in">
-                                    <div className="flex items-center gap-6 px-4">
-                                        <span className="bg-slate-900 text-white text-sm px-6 py-2 rounded-2xl font-black shadow-2xl tracking-[0.3em] border-b-4 border-slate-700">{floor}F UNITS</span>
-                                        <div className="h-[4px] flex-1 bg-slate-300 rounded-full shadow-inner"></div>
+                                <section key={floor} className="space-y-4">
+                                    <div className="flex items-center gap-4 px-2">
+                                        <span className="bg-slate-900 text-white text-[10px] px-3 py-1 rounded-lg font-black">{floor}F</span>
+                                        <div className="h-[1px] flex-1 bg-slate-300"></div>
                                     </div>
-                                    <div className="flex justify-center flex-wrap gap-8">
+                                    <div className="flex justify-center flex-wrap gap-4">
                                         {rooms.filter(r => r.floor === floor).sort((a,b)=>a.id.localeCompare(b.id)).map(room => (
                                             <RoomCard key={room.id} room={room} />
                                         ))}
@@ -224,23 +241,19 @@
                                 </section>
                             ))}
 
-                            {/* 야외 섹션 (오렌지 테마 복구) */}
-                            <section className="bg-orange-500 rounded-[64px] p-10 shadow-[0_30px_60px_-12px_rgba(249,115,22,0.3)] border-b-[16px] border-orange-700 relative overflow-hidden ring-8 ring-white/20">
-                                <div className="absolute top-0 right-0 p-32 bg-white/10 rounded-full -mr-20 -mt-20"></div>
-                                <h2 className="text-white text-2xl font-black mb-10 text-center tracking-[0.2em] uppercase relative z-10">Outdoor Checklist</h2>
-                                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 gap-6 relative z-10">
+                            <section className="bg-orange-500 rounded-[40px] p-6 shadow-2xl border-b-8 border-orange-700 mt-4 relative overflow-hidden">
+                                <h2 className="text-white text-xl font-black mb-6 text-center tracking-[0.1em] uppercase relative z-10">Outdoor Checklist</h2>
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 relative z-10">
                                     {outdoors.sort((a,b)=>a.order-b.order).map(task => {
                                         const IconComp = getIcon(task.icon);
                                         return (
                                             <button 
                                                 key={task.id} 
                                                 onClick={() => updateDb('outdoor', task.id, {checked: !task.checked})} 
-                                                className={`flex flex-col items-center justify-center p-6 rounded-[40px] transition-all active-scale border-4 shadow-xl ${task.checked?'bg-white text-orange-600 border-white scale-105':'bg-orange-600 text-orange-100 border-orange-400'}`}
+                                                className={`flex flex-col items-center justify-center p-3 rounded-3xl transition-all active-scale border-2 ${task.checked?'bg-white text-orange-600 border-white shadow-lg':'bg-orange-600 text-orange-100 border-orange-400'}`}
                                             >
-                                                <div className={`p-4 rounded-[28px] mb-3 shadow-lg ${task.checked?'bg-orange-100':'bg-orange-700'}`}>
-                                                    <IconComp size={32} />
-                                                </div>
-                                                <span className="text-lg font-black tracking-tighter uppercase leading-none">{task.label}</span>
+                                                <div className="mb-1"><IconComp size={24} /></div>
+                                                <span className="text-[10px] font-black uppercase leading-none">{task.label}</span>
                                             </button>
                                         );
                                     })}
@@ -248,54 +261,59 @@
                             </section>
                         </main>
 
-                        {/* 모달 관리창 */}
                         {activeRoom && (
-                            <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-3xl z-50 flex items-end sm:items-center justify-center p-4">
-                                <div className="bg-white w-full max-w-xl rounded-[72px] p-10 shadow-2xl border-t-[16px] border-slate-900 max-h-[92vh] overflow-y-auto scroll-hide">
-                                    <div className="flex justify-between items-start mb-12">
+                            <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-50 flex items-end sm:items-center justify-center p-4">
+                                <div className="bg-white w-full max-w-lg rounded-[60px] p-8 shadow-2xl border-t-[12px] border-slate-900 max-h-[90vh] overflow-y-auto scroll-hide">
+                                    <div className="flex justify-between items-start mb-8">
                                         <div>
-                                            <h2 className="text-7xl font-black text-slate-900 tracking-tighter leading-none mb-4">{activeRoom.name}</h2>
-                                            <div className="inline-flex items-center gap-3 bg-blue-700 text-white px-8 py-3 rounded-[32px] font-black text-3xl shadow-2xl border-b-4 border-blue-900">CODE: {activeRoom.doorCode}</div>
+                                            <h2 className="text-6xl font-black text-slate-900 tracking-tighter">{activeRoom.name}</h2>
+                                            <div className="bg-blue-700 text-white px-6 py-2 rounded-2xl font-black text-2xl mt-2">CODE: {activeRoom.doorCode}</div>
                                         </div>
-                                        <button onClick={()=>setSelId(null)} className="p-5 bg-slate-100 rounded-full active-scale">{getIcon('X')({size:44, className:'text-slate-400'})}</button>
+                                        <button onClick={()=>setSelId(null)} className="p-4 bg-slate-100 rounded-full active-scale">{getIcon('X')({size:36, className:'text-slate-400'})}</button>
                                     </div>
 
-                                    <div className="space-y-12 pb-10">
-                                        <section className="space-y-5">
-                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest px-2 flex items-center gap-4">{getIcon('User')({size:24})} 예약자 성함</h3>
-                                            <input type="text" value={activeRoom.guestName||''} onChange={e=>updateDb('rooms', activeRoom.id, {guestName: e.target.value})} className="w-full bg-slate-50 border-4 border-slate-100 rounded-[44px] px-10 py-7 text-4xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner" />
+                                    <div className="space-y-10 pb-10">
+                                        <section>
+                                            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-3 px-1">{getIcon('User')({size:20})} 예약자 성함</h3>
+                                            <input type="text" value={activeRoom.guestName||''} onChange={e=>updateDb('rooms', activeRoom.id, {guestName: e.target.value})} className="w-full bg-slate-50 border-4 border-slate-100 rounded-[32px] px-8 py-5 text-3xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner" />
                                         </section>
 
-                                        <section className="space-y-6">
-                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest px-2 flex items-center gap-4">{getIcon('Info')({size:24})} 현재 투숙 상태</h3>
-                                            <div className="grid grid-cols-3 gap-4 bg-slate-100 p-3 rounded-[48px]">
+                                        <section>
+                                            <h3 className="text-sm font-black text-slate-400 mb-5 flex items-center gap-3 px-1">{getIcon('Info')({size:20})} 투숙 상태</h3>
+                                            <div className="grid grid-cols-3 gap-3 bg-slate-100 p-2 rounded-[36px]">
                                                 {['입실','연박','공실'].map(s => (
-                                                    <button key={s} onClick={()=>updateDb('rooms', activeRoom.id, {status:s})} className={`py-6 rounded-[36px] font-black text-2xl transition-all ${activeRoom.status===s?'bg-white text-slate-900 shadow-2xl scale-105':'text-slate-400'}`}>{s}</button>
+                                                    <button key={s} onClick={()=>updateDb('rooms', activeRoom.id, {status:s})} className={`py-5 rounded-[28px] font-black text-xl transition-all ${activeRoom.status===s?'bg-white text-slate-900 shadow-xl scale-105':'text-slate-400'}`}>{s}</button>
                                                 ))}
                                             </div>
                                         </section>
 
-                                        <section className="space-y-6">
-                                            <div className="flex justify-between items-center px-2">
-                                                <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest">시설 점검</h3>
-                                                <button onClick={()=>{const n={}; Object.keys(activeRoom.checklist).forEach(k=>n[k]=true); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[13px] font-black bg-emerald-100 text-emerald-700 px-6 py-2.5 rounded-[24px]">전체 체크</button>
+                                        <section>
+                                            <div className="flex justify-between items-center mb-5 px-1">
+                                                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">시설 점검</h3>
+                                                <div className="flex gap-2">
+                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(item=>n[item.key]=true); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[11px] font-black bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl">전체 체크</button>
+                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(item=>n[item.key]=false); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[11px] font-black bg-slate-100 text-slate-500 px-4 py-2 rounded-xl">전체 해제</button>
+                                                </div>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-5">
-                                                {Object.entries(activeRoom.checklist||{}).map(([k,v]) => (
-                                                    <button key={k} onClick={()=>updateDb('rooms', activeRoom.id, {[`checklist.${k}`]:!v})} className={`flex items-center gap-6 p-6 rounded-[40px] border-4 transition-all text-left active-scale ${v?'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-lg scale-[1.02]':'bg-slate-50 border-slate-100 text-slate-300'}`}>
-                                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-4 ${v?'bg-emerald-600 border-emerald-600 shadow-lg':'bg-white border-slate-200'}`}>{v && getIcon('Check')({size:24, className:'text-white', strokeWidth:6})}</div>
-                                                        <span className="text-xl font-black">{{utensils:'집기류', lights:'조명', bathroom:'화장실', floor:'바닥청소', terrace:'테라스', tv:'TV', mosquito:'모기향', aircon:'에어컨', plants:'화분', boiler:'보일러'}[k]||k}</span>
-                                                    </button>
-                                                ))}
+                                            <div className="grid grid-cols-2 gap-4">
+                                                {CHECKLIST_KEYS.map(({key, label}) => {
+                                                    const val = activeRoom.checklist?.[key] || false;
+                                                    return (
+                                                        <button key={key} onClick={()=>updateDb('rooms', activeRoom.id, {[`checklist.${key}`]: !val})} className={`flex items-center gap-4 p-5 rounded-[32px] border-4 transition-all text-left active-scale ${val ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-300'}`}>
+                                                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border-4 ${val ? 'bg-emerald-600 border-emerald-600 shadow-lg' : 'bg-white border-slate-200'}`}>{val && getIcon('Check')({size:20, className:'text-white', strokeWidth:6})}</div>
+                                                            <span className="text-lg font-black">{label}</span>
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         </section>
 
-                                        <section className="space-y-5">
-                                            <h3 className="text-lg font-black text-slate-400 uppercase tracking-widest px-2 flex items-center gap-4">{getIcon('FileText')({size:24})} 관리 메모</h3>
-                                            <textarea value={activeRoom.memo||''} onChange={e=>updateDb('rooms', activeRoom.id, {memo: e.target.value})} rows="5" className="w-full bg-slate-50 border-4 border-slate-100 rounded-[44px] px-10 py-8 text-2xl font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-inner resize-none" placeholder="특이사항 입력" />
+                                        <section>
+                                            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-3 px-1">{getIcon('FileText')({size:20})} 관리 메모</h3>
+                                            <textarea value={activeRoom.memo||''} onChange={e=>updateDb('rooms', activeRoom.id, {memo: e.target.value})} rows="5" className="w-full bg-slate-50 border-4 border-slate-100 rounded-[36px] px-8 py-6 text-xl font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-inner resize-none" placeholder="특이사항 입력" />
                                         </section>
                                     </div>
-                                    <button onClick={()=>setSelId(null)} className="w-full mt-4 py-8 bg-slate-900 text-white rounded-[44px] font-black text-3xl uppercase shadow-2xl border-b-8 border-black">저장 완료</button>
+                                    <button onClick={()=>setSelId(null)} className="w-full mt-4 py-8 bg-slate-900 text-white rounded-[44px] font-black text-3xl border-b-8 border-black shadow-2xl active-scale">관리 완료</button>
                                 </div>
                             </div>
                         )}
