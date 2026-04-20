@@ -9,9 +9,8 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/lucide-react"></script>
-    <!-- Firebase SDK -->
+    <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -23,33 +22,29 @@
             margin:0; 
             user-select: none;
             -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none;
         }
         .scroll-hide::-webkit-scrollbar { display: none; }
         .scroll-hide { -ms-overflow-style: none; scrollbar-width: none; }
         .active-scale:active { transform: scale(0.95); }
         .fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
     </style>
 </head>
 <body>
-    <div id="root">
-        <div style="display:flex; height:100vh; flex-direction:column; align-items:center; justify-content:center; background:#0f172a; color:white;">
-            <div style="width:40px; height:40px; border:4px solid #f97316; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:20px;"></div>
-            <p style="font-weight:900; letter-spacing:0.1em;">롬하우스 시스템 동기화 중...</p>
-        </div>
-    </div>
-    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    <div id="root"></div>
 
     <script type="text/babel">
         (function() {
-            const { useState, useEffect, useMemo, useCallback } = React;
+            const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
-            const getIcon = (name) => {
+            // 아이콘 안전 로딩용 헬퍼
+            const SafeIcon = ({ name, size = 20, className = "", strokeWidth = 2.5 }) => {
                 const lib = window.lucideReact || {};
-                return lib[name] || lib['HelpCircle'] || (() => null);
+                const pascalName = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+                const IconComponent = lib[pascalName] || lib['HelpCircle'] || (() => null);
+                return <IconComponent size={size} className={className} strokeWidth={strokeWidth} />;
             };
 
             const CHECKLIST_KEYS = [
@@ -60,37 +55,34 @@
                 { key: 'plants', label: '화분' }, { key: 'boiler', label: '보일러' }
             ];
 
+            const FIXED_APP_ID = "romhouse-resort-final-v16";
+
             const INITIAL_ROOMS = [
-                { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '1-A', name: 'A룸', floor: 1, doorCode: '1470', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '1-R', name: 'R룸', floor: 1, doorCode: '2580', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '2-O', name: 'O룸', floor: 2, doorCode: '3690', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '2-M', name: 'M룸', floor: 2, doorCode: '1230', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '3-I', name: 'I룸', floor: 3, doorCode: '4560', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } },
-                { id: '3-N', name: 'N룸', floor: 3, doorCode: '7890', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: { utensils: false, lights: false, bathroom: false, floor: false, terrace: false, tv: false, mosquito: false, aircon: false, plants: false, boiler: false } }
+                { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '1-A', name: 'A룸', floor: 1, doorCode: '1470', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '1-R', name: 'R룸', floor: 1, doorCode: '2580', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '2-O', name: 'O룸', floor: 2, doorCode: '3690', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '2-M', name: 'M룸', floor: 2, doorCode: '1230', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '3-I', name: 'I룸', floor: 3, doorCode: '4560', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
+                { id: '3-N', name: 'N룸', floor: 3, doorCode: '7890', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} }
             ];
 
             const INITIAL_OUTDOORS = [
-                { id: 'pool', label: '수영장', checked: false, order: 1, icon: 'Waves' },
-                { id: 'yard', label: '마당', checked: false, order: 2, icon: 'TreePine' },
-                { id: 'bbq', label: '바베큐장', checked: false, order: 3, icon: 'Flame' },
-                { id: 'trash', label: '쓰레기장', checked: false, order: 4, icon: 'Trash2' },
-                { id: 'stairs', label: '계단청소', checked: false, order: 5, icon: 'Layers' },
-                { id: 'entrance', label: '현관등', checked: false, order: 6, icon: 'Lightbulb' },
-                { id: 'dryer', label: '건조기', checked: false, order: 7, icon: 'Wind' },
-                { id: 'laundry', label: '빨래', checked: false, order: 8, icon: 'Shirt' },
-                { id: 'supplies', label: '비품', checked: false, order: 9, icon: 'Package' }
+                {id:'pool', label:'수영장', icon:'waves', order:1},
+                {id:'yard', label:'마당', icon:'tree-pine', order:2},
+                {id:'bbq', label:'바베큐장', icon:'flame', order:3},
+                {id:'trash', label:'쓰레기장', icon:'trash-2', order:4},
+                {id:'stairs', label:'계단청소', icon:'layers', order:5},
+                {id:'entrance', label:'현관등', icon:'lightbulb', order:6},
+                {id:'dryer', label:'건조기', icon:'wind', order:7},
+                {id:'laundry', label:'빨래', icon:'shirt', order:8},
+                {id:'supplies', label:'비품', icon:'package', order:9}
             ];
 
+            // Firebase 초기화
             let fbConfig = null;
             try { fbConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null; } catch (e) {}
-            
-            // 모든 기기에서 동일한 데이터를 보기 위해 고정된 ID 사용
-            const FIXED_APP_ID = "romhouse-resort-final-v4";
-
-            if (fbConfig && fbConfig.apiKey && !firebase.apps.length) {
-                firebase.initializeApp(fbConfig);
-            }
+            if (fbConfig && fbConfig.apiKey && !firebase.apps.length) firebase.initializeApp(fbConfig);
             const auth = firebase.auth();
             const db = firebase.firestore();
 
@@ -101,12 +93,12 @@
                     return () => clearInterval(t);
                 }, []);
                 return (
-                    <div className="text-center py-2 bg-slate-900/10 rounded-2xl mb-4 border border-white/20">
-                        <div className="text-[11px] text-slate-500 font-black uppercase tracking-widest leading-none mb-1">
+                    <div className="text-center py-2 bg-slate-900/15 rounded-2xl mb-4 border border-white/10 shadow-inner">
+                        <div className="text-[10px] text-slate-500 font-black uppercase mb-0.5 tracking-widest leading-none">
                             {time.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
                         </div>
-                        <div className="text-orange-600 font-black text-2xl tracking-tighter">
-                            {time.toLocaleTimeString('ko-KR', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        <div className="text-orange-600 font-black text-2xl tracking-tighter tabular-nums">
+                            {time.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </div>
                     </div>
                 );
@@ -115,52 +107,116 @@
             const App = () => {
                 const [user, setUser] = useState(null);
                 const [rooms, setRooms] = useState(INITIAL_ROOMS);
-                const [outdoors, setOutdoors] = useState(INITIAL_OUTDOORS);
+                const [outdoors, setOutdoors] = useState(INITIAL_OUTDOORS.map(o => ({...o, checked: false})));
+                const [dailyMemo, setDailyMemo] = useState("");
                 const [selId, setSelId] = useState(null);
                 const [loading, setLoading] = useState(true);
+                
+                const lastAutoUpdateRef = useRef(""); // 오늘 자동 업데이트 여부 체크용
 
                 const activeRoom = useMemo(() => rooms.find(r => r.id === selId), [rooms, selId]);
 
+                // 1. 인증
                 useEffect(() => {
-                    const timer = setTimeout(() => setLoading(false), 5000);
-                    auth.signInAnonymously().catch(e => { console.error(e); setLoading(false); });
-                    const unsub = auth.onAuthStateChanged(setUser);
-                    return () => { unsub(); clearTimeout(timer); };
+                    const timeout = setTimeout(() => setLoading(false), 3000);
+                    auth.signInAnonymously().catch(() => setLoading(false));
+                    const unsub = auth.onAuthStateChanged(u => { setUser(u); if (u) setLoading(false); });
+                    return () => { unsub(); clearTimeout(timeout); };
                 }, []);
 
+                // 2. 실시간 데이터 구독
                 useEffect(() => {
                     if (!user) return;
                     const rRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('rooms');
                     const oRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('outdoor');
+                    const mRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('summaries').doc('daily_memo');
 
                     const unsubR = rRef.onSnapshot(s => {
                         if (s.empty) {
                             const b = db.batch();
                             INITIAL_ROOMS.forEach(r => b.set(rRef.doc(r.id), r));
-                            INITIAL_OUTDOORS.forEach(o => b.set(oRef.doc(o.id), o));
                             b.commit();
                         } else {
                             setRooms(s.docs.map(d => ({ id: d.id, ...d.data() })));
-                            setLoading(false);
                         }
                     });
 
                     const unsubO = oRef.onSnapshot(s => {
-                        if (!s.empty) setOutdoors(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                        if (s.empty) {
+                            const b = db.batch();
+                            INITIAL_OUTDOORS.forEach((item) => b.set(oRef.doc(item.id), { ...item, checked: false }));
+                            b.commit();
+                        } else {
+                            setOutdoors(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.order - b.order));
+                        }
                     });
 
-                    return () => { unsubR(); unsubO(); };
+                    const unsubM = mRef.onSnapshot(s => {
+                        if (s.exists) {
+                            setDailyMemo(s.data().content || "");
+                        } else {
+                            setDoc(mRef, { content: "" });
+                        }
+                    });
+
+                    return () => { unsubR(); unsubO(); unsubM(); };
                 }, [user]);
 
-                const updateDb = async (col, id, fields) => {
-                    // 기기 즉시 반응성을 위해 로컬 상태 먼저 업데이트
-                    if (col === 'rooms') setRooms(p => p.map(r => r.id === id ? { ...r, ...fields } : r));
-                    else setOutdoors(p => p.map(o => o.id === id ? { ...o, ...fields } : o));
+                // 3. 오후 5시 50분 자동 현황 업데이트 로직
+                useEffect(() => {
+                    const interval = setInterval(() => {
+                        const now = new Date();
+                        const hours = now.getHours();
+                        const minutes = now.getMinutes();
+                        const seconds = now.getSeconds();
+                        const todayKey = now.toDateString();
 
-                    if (!user) return;
-                    try {
-                        await db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection(col).doc(id).update(fields);
-                    } catch (e) { console.error("Sync Error:", e); }
+                        // 17:50:00 에 딱 한 번 실행
+                        if (hours === 17 && minutes === 50 && seconds === 0 && lastAutoUpdateRef.current !== todayKey) {
+                            lastAutoUpdateRef.current = todayKey;
+                            
+                            const inRooms = rooms.filter(r => r.status === '입실').map(r => r.name).join(', ');
+                            const stayRooms = rooms.filter(r => r.status === '연박').map(r => r.name).join(', ');
+                            const emptyRooms = rooms.filter(r => r.status === '공실').map(r => r.name).join(', ');
+                            
+                            const summaryText = `[${now.toLocaleDateString()}] 오후 5:50 현황\n입실: ${inRooms || '없음'}\n연박: ${stayRooms || '없음'}\n공실: ${emptyRooms || '없음'}`;
+                            
+                            updateMemoInDb(summaryText);
+                        }
+                    }, 1000);
+                    return () => clearInterval(interval);
+                }, [rooms]);
+
+                const updateDb = async (col, id, fields) => {
+                    if (col === 'rooms') {
+                        setRooms(prev => prev.map(r => {
+                            if (r.id !== id) return r;
+                            const newRoom = JSON.parse(JSON.stringify(r));
+                            for (const key in fields) {
+                                if (key.includes('.')) {
+                                    const [parent, child] = key.split('.');
+                                    newRoom[parent] = { ...newRoom[parent], [child]: fields[key] };
+                                } else {
+                                    newRoom[key] = fields[key];
+                                }
+                            }
+                            return newRoom;
+                        }));
+                    } else {
+                        setOutdoors(prev => prev.map(o => o.id === id ? { ...o, ...fields } : o));
+                    }
+                    if (user) {
+                        try { await db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection(col).doc(id).update(fields); }
+                        catch (e) { console.error("Sync Error", e); }
+                    }
+                };
+
+                const updateMemoInDb = async (newContent) => {
+                    setDailyMemo(newContent);
+                    if (user) {
+                        const mRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('summaries').doc('daily_memo');
+                        await mRef.set({ content: newContent }, { merge: true });
+                    }
                 };
 
                 const handleVacancyReset = async (roomId) => {
@@ -169,48 +225,45 @@
                         guestName: '',
                         checklist: CHECKLIST_KEYS.reduce((acc, curr) => ({ ...acc, [curr.key]: false }), {}),
                         quickChecks: { terrace: false, window: false }
-                        // 메모(memo)는 포함하지 않아 유지됨
                     };
                     await updateDb('rooms', roomId, resetFields);
                     setSelId(null);
                 };
 
                 const getBg = (s) => {
-                    if (s === '입실') return 'bg-emerald-600 text-white shadow-xl';
-                    if (s === '연박') return 'bg-slate-400 text-white shadow-xl'; 
+                    if (s === '입실') return 'bg-emerald-600 text-white shadow-lg border-emerald-700';
+                    if (s === '연박') return 'bg-slate-400 text-white shadow-lg border-slate-500'; 
                     return 'bg-white text-slate-500 border-2 border-slate-200';
                 };
 
                 const RoomCard = ({ room }) => {
-                    const isAllDone = Object.values(room.checklist || {}).every(v => v === true);
-                    const hasMemoText = room.memo && room.memo.trim().length > 0;
+                    const isAllDone = CHECKLIST_KEYS.every(k => room.checklist?.[k.key] === true);
+                    const hasMemoContent = room.memo && room.memo.trim().length > 0;
                     
                     return (
-                        <div onClick={() => setSelId(room.id)} className={`relative flex flex-col items-center py-4 w-[110px] h-[260px] sm:w-[130px] sm:h-[280px] rounded-[32px] border-b-4 active-scale ${getBg(room.status)} cursor-pointer transition-all hover:-translate-y-1 fade-in`}>
-                            <span className="text-3xl font-black mb-1 uppercase tracking-tighter">{room.name}</span>
-                            <div className={`text-xl font-black px-2 py-0.5 rounded-lg mb-2 ${room.status==='공실'?'bg-slate-100 text-slate-800':'bg-black/20 text-white'}`}>{room.doorCode}</div>
-                            <span className="text-[12px] font-black mb-2 truncate px-2 text-center w-full h-4">
+                        <div onClick={() => setSelId(room.id)} className={`relative flex flex-col items-center py-3 w-[105px] h-[255px] sm:w-[135px] sm:h-[280px] rounded-[32px] border-b-4 active-scale ${getBg(room.status)} cursor-pointer transition-all fade-in`}>
+                            <span className="text-3xl font-black mb-1 tracking-tighter uppercase leading-none">{room.name}</span>
+                            <div className={`text-xl font-black px-2 py-0.5 rounded-lg mb-1 ${room.status==='공실'?'bg-slate-100 text-slate-800':'bg-black/20 text-white'}`}>{room.doorCode}</div>
+                            <span className="text-[10px] font-black mb-1 truncate px-1 text-center w-full h-3">
                                 {room.guestName || (room.status==='공실'?"":"정보 없음")}
                             </span>
                             
-                            <div className="flex flex-col gap-1 mb-2 items-center">
-                                <div className={`flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full ${isAllDone?'bg-emerald-500 text-white':'bg-orange-500 text-white'}`}>
-                                    {isAllDone?'점검완료':'점검중'}
+                            <div className="flex flex-col gap-0.5 mb-2 items-center scale-95">
+                                <div className={`flex items-center gap-1 text-[8px] font-black px-1.5 py-0.5 rounded-full ${isAllDone?'bg-emerald-500 text-white':'bg-orange-500 text-white'}`}>
+                                    {isAllDone?'완료':'점검중'}
                                 </div>
-                                {hasMemoText && (
-                                    <div className="flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full bg-purple-600 text-white shadow-sm">
-                                        메모 있음
-                                    </div>
+                                {hasMemoContent && (
+                                    <div className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-purple-600 text-white shadow-sm">메모 있음</div>
                                 )}
                             </div>
 
-                            <span className={`text-[10px] font-black uppercase mt-auto mb-2 px-2 py-0.5 rounded-lg bg-black/10`}>{room.status}</span>
+                            <span className={`text-[9px] font-black uppercase mt-auto mb-1.5 px-2 py-0.5 rounded-lg bg-black/10`}>{room.status}</span>
 
-                            <div className="w-full px-2 flex justify-center gap-3 pt-2 border-t border-black/5 mt-auto">
+                            <div className="w-full px-1 flex justify-center gap-1.5 pt-1.5 border-t border-black/5 mt-auto">
                                 {['terrace', 'window'].map(q => (
-                                    <div key={q} onClick={e => {e.stopPropagation(); updateDb('rooms', room.id, {[`quickChecks.${q}`]: !room.quickChecks[q]});}} className={`flex flex-col items-center gap-0.5 ${room.quickChecks?.[q]?'opacity-100':'opacity-30'}`}>
-                                        {getIcon('CheckSquare')({size:16, className: room.quickChecks?.[q]?(room.status==='공실'?'text-emerald-600':'text-yellow-300'):''})}
-                                        <span className="text-[8px] font-black">{q==='terrace'?'테라스':'유리창'}</span>
+                                    <div key={q} onClick={e => {e.stopPropagation(); updateDb('rooms', room.id, {[`quickChecks.${q}`]: !room.quickChecks?.[q]});}} className={`flex flex-col items-center gap-0.5 ${room.quickChecks?.[q]?'opacity-100':'opacity-30'}`}>
+                                        <SafeIcon name="check-square" size={14} className={room.quickChecks?.[q]?(room.status==='공실'?'text-emerald-600':'text-yellow-300'):''} />
+                                        <span className="text-[7px] font-black">{q==='terrace'?'테라스':'유리창'}</span>
                                     </div>
                                 ))}
                             </div>
@@ -219,27 +272,27 @@
                 };
 
                 if (loading) return (
-                    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
-                        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p className="font-black tracking-widest uppercase text-sm">연결 중...</p>
+                    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-6">
+                        <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p className="font-black tracking-widest uppercase text-xs">ROMHOUSE LOADING...</p>
                     </div>
                 );
 
                 return (
                     <div className="min-h-screen flex flex-col bg-slate-200 overflow-x-hidden">
                         <header className="bg-slate-800 px-4 py-4 shadow-xl border-b border-slate-700 shrink-0">
-                            <h1 className="text-3xl font-black text-white tracking-tighter text-center mb-4">ROMHOUSE</h1>
+                            <h1 className="text-3xl font-black text-white tracking-tighter text-center mb-2">ROMHOUSE</h1>
                             <Clock />
                         </header>
 
-                        <main className="flex-1 p-2 flex flex-col gap-4 max-w-4xl mx-auto w-full pb-32 pt-2 scroll-hide overflow-y-auto">
+                        <main className="flex-1 p-1 flex flex-col gap-2 max-w-4xl mx-auto w-full pb-48 pt-1 scroll-hide overflow-y-auto">
                             {[1, 2, 3].map(floor => (
-                                <section key={floor} className="space-y-2">
-                                    <div className="flex items-center gap-3 px-2">
-                                        <span className="bg-slate-900 text-white text-[9px] px-2 py-0.5 rounded font-black">{floor}F</span>
+                                <section key={floor} className="space-y-1">
+                                    <div className="flex items-center gap-2 px-2">
+                                        <span className="bg-slate-900 text-white text-[8px] px-1.5 py-0.5 rounded font-black">{floor}F</span>
                                         <div className="h-[1px] flex-1 bg-slate-300"></div>
                                     </div>
-                                    <div className="flex justify-center flex-wrap gap-2 sm:gap-4">
+                                    <div className="flex justify-center flex-wrap gap-1.5 sm:gap-2">
                                         {rooms.filter(r => r.floor === floor).sort((a,b)=>a.id.localeCompare(b.id)).map(room => (
                                             <RoomCard key={room.id} room={room} />
                                         ))}
@@ -247,84 +300,115 @@
                                 </section>
                             ))}
 
-                            <section className="bg-orange-500 rounded-[32px] p-4 shadow-2xl border-b-4 border-orange-700 mt-2">
-                                <h2 className="text-white text-sm font-black mb-3 text-center uppercase tracking-widest">Outdoor Facility</h2>
-                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                                    {outdoors.sort((a,b)=>a.order-b.order).map(task => {
-                                        const IconComp = getIcon(task.icon);
-                                        return (
-                                            <button 
-                                                key={task.id} 
-                                                onClick={() => updateDb('outdoor', task.id, {checked: !task.checked})} 
-                                                className={`flex flex-col items-center justify-center p-2 rounded-2xl transition-all active-scale border ${task.checked?'bg-white text-orange-600 border-white':'bg-orange-600 text-orange-100 border-orange-400'}`}
-                                            >
-                                                <IconComp size={20} className="mb-1" />
-                                                <span className="text-[9px] font-black uppercase">{task.label}</span>
-                                            </button>
-                                        );
-                                    })}
+                            {/* 야외 점검 섹션 */}
+                            <section className="bg-orange-500 rounded-[24px] p-4 shadow-xl border-b-8 border-orange-700 mt-2 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-12 bg-white/10 rounded-full -mr-6 -mt-6"></div>
+                                <div className="mb-4 relative z-10">
+                                    <div className="flex justify-between items-center mb-3 px-1">
+                                        <h2 className="text-white text-[11px] font-black uppercase tracking-widest">Outdoor Checklist</h2>
+                                        <div className="flex gap-1.5">
+                                            <button onClick={() => outdoors.forEach(o => updateDb('outdoor', o.id, {checked: true}))} className="bg-white/20 hover:bg-white/30 text-white text-[9px] font-black px-3 py-1.5 rounded-xl border border-white/30 active-scale">전체 체크</button>
+                                            <button onClick={() => outdoors.forEach(o => updateDb('outdoor', o.id, {checked: false}))} className="bg-black/20 hover:bg-black/30 text-white text-[9px] font-black px-3 py-1.5 rounded-xl border border-black/10 active-scale">전체 해제</button>
+                                        </div>
+                                    </div>
                                 </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 relative z-10">
+                                    {outdoors.map(task => (
+                                        <button 
+                                            key={task.id} 
+                                            onClick={() => updateDb('outdoor', task.id, {checked: !task.checked})} 
+                                            className={`flex items-center gap-3 p-3 rounded-2xl transition-all active-scale border-2 shadow-sm ${task.checked?'bg-white text-orange-600 border-white':'bg-orange-600 text-orange-100 border-orange-400'}`}
+                                        >
+                                            <div className={`p-2 rounded-lg ${task.checked ? 'bg-orange-100' : 'bg-orange-700'}`}>
+                                                <SafeIcon name={task.icon} size={20} />
+                                            </div>
+                                            <span className="text-[12px] font-black uppercase tracking-tight">{task.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </section>
+
+                            {/* [신규] 일일 현황 메모장 (야외 체크리스트 하단) */}
+                            <section className="bg-slate-800 rounded-[24px] p-5 shadow-xl border-b-8 border-slate-900 mt-2 mb-10">
+                                <div className="flex justify-between items-center mb-3 px-1">
+                                    <h2 className="text-white text-[12px] font-black uppercase tracking-widest flex items-center gap-2">
+                                        <SafeIcon name="clipboard-list" size={16} className="text-orange-500" /> 일일 현황 메모장
+                                    </h2>
+                                    <span className="text-slate-400 text-[9px] font-bold">오후 5:50 자동 요약</span>
+                                </div>
+                                <textarea 
+                                    value={dailyMemo} 
+                                    onChange={(e) => updateMemoInDb(e.target.value)}
+                                    rows="6"
+                                    className="w-full bg-slate-700 border-2 border-slate-600 rounded-2xl px-5 py-4 text-white text-base font-bold focus:outline-none focus:border-orange-500 shadow-inner resize-none transition-all placeholder-slate-500"
+                                    placeholder="오후 5시 50분에 현황이 자동 기록됩니다. 직접 수정도 가능합니다."
+                                />
                             </section>
                         </main>
 
+                        {/* 상세 관리 모달창 */}
                         {activeRoom && (
-                            <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-2 sm:p-4">
-                                <div className="bg-white w-full max-w-lg rounded-[40px] p-6 shadow-2xl border-t-[8px] border-slate-900 max-h-[95vh] overflow-y-auto scroll-hide">
-                                    <div className="flex justify-between items-start mb-6">
+                            <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-2">
+                                <div className="bg-white w-full max-w-lg rounded-[40px] p-5 shadow-2xl border-t-[8px] border-slate-900 max-h-[95vh] overflow-y-auto scroll-hide">
+                                    <div className="flex justify-between items-start mb-5">
                                         <div>
                                             <h2 className="text-5xl font-black text-slate-900 tracking-tighter leading-none">{activeRoom.name}</h2>
-                                            <div className="bg-blue-700 text-white px-4 py-1 rounded-xl font-black text-xl mt-2 inline-block">CODE: {activeRoom.doorCode}</div>
+                                            <div className="bg-blue-700 text-white px-3 py-1 rounded-lg font-black text-lg mt-1.5 inline-block">CODE: {activeRoom.doorCode}</div>
                                         </div>
-                                        <button onClick={()=>setSelId(null)} className="p-3 bg-slate-100 rounded-full active-scale">{getIcon('X')({size:28, className:'text-slate-400'})}</button>
+                                        <button onClick={()=>setSelId(null)} className="p-2 bg-slate-100 rounded-full active-scale"><SafeIcon name="x" size={24} className="text-slate-400" /></button>
                                     </div>
 
-                                    <div className="space-y-6 pb-6">
-                                        {/* 예약자 */}
+                                    <div className="space-y-5 pb-4">
                                         <section>
-                                            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2 px-1">예약자 성함</h3>
-                                            <input type="text" value={activeRoom.guestName||''} onChange={e=>updateDb('rooms', activeRoom.id, {guestName: e.target.value})} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 text-2xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner" placeholder="성함 입력" />
+                                            <h3 className="text-[10px] font-black text-slate-400 uppercase mb-1.5 px-1 flex items-center gap-2"><SafeIcon name="user" size={12}/> 예약자 성함</h3>
+                                            <input type="text" value={activeRoom.guestName||''} onChange={e=>updateDb('rooms', activeRoom.id, {guestName: e.target.value})} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-2.5 text-xl font-black text-slate-900 focus:outline-none focus:border-blue-600 shadow-inner" placeholder="성함 입력" />
                                         </section>
 
-                                        {/* 상태 */}
                                         <section>
-                                            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2 px-1">투숙 상태</h3>
-                                            <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl">
+                                            <h3 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2"><SafeIcon name="info" size={12}/> 투숙 상태 설정</h3>
+                                            <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-2xl">
                                                 {['입실','연박'].map(s => (
-                                                    <button key={s} onClick={()=>updateDb('rooms', activeRoom.id, {status:s})} className={`py-3 rounded-xl font-black text-lg transition-all ${activeRoom.status===s?'bg-white text-slate-900 shadow-md':'text-slate-400'}`}>{s}</button>
+                                                    <button key={s} onClick={()=>updateDb('rooms', activeRoom.id, {status:s})} className={`py-2.5 rounded-xl font-black text-base transition-all ${activeRoom.status===s ? 'bg-white text-slate-900 shadow-md scale-105' : 'text-slate-400'}`}>{s}</button>
                                                 ))}
-                                                <button onClick={() => handleVacancyReset(activeRoom.id)} className={`py-3 rounded-xl font-black text-lg transition-all ${activeRoom.status==='공실'?'bg-white text-red-600 shadow-md':'text-slate-400'}`}>공실</button>
+                                                <button onClick={() => handleVacancyReset(activeRoom.id)} className={`py-2.5 rounded-xl font-black text-base transition-all ${activeRoom.status==='공실'?'bg-white text-red-600 shadow-md scale-105':'text-slate-400'}`}>공실</button>
                                             </div>
                                         </section>
 
-                                        {/* 체크리스트 */}
                                         <section>
-                                            <div className="flex justify-between items-center mb-3 px-1">
-                                                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest">시설 점검</h3>
-                                                <div className="flex gap-2">
-                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(i=>n[i.key]=true); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg">전체 체크</button>
-                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(i=>n[i.key]=false); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded-lg">전체 해제</button>
+                                            <div className="flex justify-between items-center mb-2 px-1">
+                                                <h3 className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"><SafeIcon name="check-circle" size={12}/> 시설 점검</h3>
+                                                <div className="flex gap-1.5">
+                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(i=>n[i.key]=true); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[8px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md active-scale">전체 체크</button>
+                                                    <button onClick={()=>{const n={}; CHECKLIST_KEYS.forEach(i=>n[i.key]=false); updateDb('rooms', activeRoom.id, {checklist:n});}} className="text-[8px] font-black bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md active-scale">전체 해제</button>
                                                 </div>
                                             </div>
                                             <div className="grid grid-cols-2 gap-2">
                                                 {CHECKLIST_KEYS.map(({key, label}) => {
-                                                    const val = activeRoom.checklist?.[key] || false;
+                                                    const isChecked = activeRoom.checklist?.[key] === true;
                                                     return (
-                                                        <button key={key} onClick={()=>updateDb('rooms', activeRoom.id, {[`checklist.${key}`]: !val})} className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all text-left active-scale ${val ? 'bg-emerald-50 border-emerald-500 text-emerald-900' : 'bg-slate-50 border-slate-100 text-slate-300'}`}>
-                                                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center border-2 ${val ? 'bg-emerald-600 border-emerald-600 shadow-md' : 'bg-white border-slate-200'}`}>{val && getIcon('Check')({size:14, className:'text-white', strokeWidth:6})}</div>
-                                                            <span className="text-[15px] font-black">{label}</span>
+                                                        <button 
+                                                            key={key} 
+                                                            onClick={() => updateDb('rooms', activeRoom.id, { [`checklist.${key}`]: !isChecked })} 
+                                                            className={`flex items-center gap-2 p-2.5 rounded-xl border-2 transition-all text-left active-scale ${isChecked ? 'bg-emerald-50 border-emerald-500 text-emerald-900' : 'bg-slate-50 border-slate-100 text-slate-300'}`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded-md flex items-center justify-center border-2 transition-all ${isChecked ? 'bg-emerald-600 border-emerald-600 shadow-sm' : 'bg-white border-slate-200'}`}>
+                                                                {isChecked && <SafeIcon name="check" size={14} className="text-white" strokeWidth={6} />}
+                                                            </div>
+                                                            <span className="text-[14px] font-black">{label}</span>
                                                         </button>
                                                     );
                                                 })}
                                             </div>
                                         </section>
 
-                                        {/* 메모 */}
                                         <section>
-                                            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2 px-1">관리 메모 (지우기 전까지 보관됨)</h3>
-                                            <textarea value={activeRoom.memo||''} onChange={e=>updateDb('rooms', activeRoom.id, {memo: e.target.value})} rows="4" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 text-lg font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-inner resize-none" placeholder="특이사항 입력" />
+                                            <h3 className="text-[10px] font-black text-slate-400 uppercase mb-1.5 px-1 flex items-center gap-1">
+                                                <SafeIcon name="file-text" size={12} /> 관리 메모 (공실 시에도 유지됨)
+                                            </h3>
+                                            <textarea value={activeRoom.memo||''} onChange={e=>updateDb('rooms', activeRoom.id, {memo: e.target.value})} rows="3" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-2 text-base font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-inner resize-none transition-all" placeholder="특이사항을 기록하세요" />
                                         </section>
                                     </div>
-                                    <button onClick={()=>setSelId(null)} className="w-full mt-2 py-5 bg-slate-900 text-white rounded-3xl font-black text-2xl border-b-4 border-black active-scale">저장 및 닫기</button>
+                                    <button onClick={()=>setSelId(null)} className="w-full mt-2 py-4 bg-slate-900 text-white rounded-3xl font-black text-2xl border-b-8 border-black active-scale shadow-2xl">저장 및 닫기</button>
                                 </div>
                             </div>
                         )}
