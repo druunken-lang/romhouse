@@ -10,7 +10,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide-react"></script>
-    <!-- Firebase SDK (Compat) -->
+    <!-- Firebase SDK (Compat version for stability) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -55,7 +55,8 @@
                 { key: 'plants', label: '화분' }, { key: 'boiler', label: '보일러' }
             ];
 
-            const FIXED_APP_ID = "romhouse-resort-final-v16";
+            // [온라인 필수 설정] 시스템에서 제공하는 아이디 사용
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'romhouse-final-app';
 
             const INITIAL_ROOMS = [
                 { id: '1-S', name: '1인실', floor: 1, doorCode: '1121', status: '공실', guestName: '', memo: '', quickChecks: { terrace: false, window: false }, checklist: {} },
@@ -116,18 +117,35 @@
 
                 const activeRoom = useMemo(() => rooms.find(r => r.id === selId), [rooms, selId]);
 
+                // [온라인 필수] 인증 로직 강화
                 useEffect(() => {
-                    const timeout = setTimeout(() => setLoading(false), 3000);
-                    auth.signInAnonymously().catch(() => setLoading(false));
-                    const unsub = auth.onAuthStateChanged(u => { setUser(u); if (u) setLoading(false); });
-                    return () => { unsub(); clearTimeout(timeout); };
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await auth.signInWithCustomToken(__initial_auth_token);
+                            } else {
+                                await auth.signInAnonymously();
+                            }
+                        } catch (e) {
+                            console.error("Auth Fail", e);
+                            setLoading(false);
+                        }
+                    };
+                    initAuth();
+                    const unsub = auth.onAuthStateChanged(u => {
+                        setUser(u);
+                        if (u) setLoading(false);
+                    });
+                    return () => unsub();
                 }, []);
 
+                // 실시간 데이터 구독
                 useEffect(() => {
                     if (!user) return;
-                    const rRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('rooms');
-                    const oRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('outdoor');
-                    const mRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('summaries').doc('daily_memo');
+
+                    const rRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms');
+                    const oRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('outdoor');
+                    const mRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('summaries').doc('daily_memo');
 
                     const unsubR = rRef.onSnapshot(s => {
                         if (s.empty) {
@@ -153,7 +171,6 @@
                         if (s.exists) {
                             setDailyMemo(s.data().content || "");
                         } else {
-                            // Syntax error fixed: use .set() on the doc ref
                             mRef.set({ content: "" });
                         }
                     });
@@ -161,15 +178,16 @@
                     return () => { unsubR(); unsubO(); unsubM(); };
                 }, [user]);
 
+                // 오후 5:50 자동 요약
                 useEffect(() => {
                     const interval = setInterval(() => {
                         const now = new Date();
-                        const hours = now.getHours();
-                        const minutes = now.getMinutes();
-                        const seconds = now.getSeconds();
+                        const h = now.getHours();
+                        const m = now.getMinutes();
+                        const s = now.getSeconds();
                         const todayKey = now.toDateString();
 
-                        if (hours === 17 && minutes === 50 && seconds === 0 && lastAutoUpdateRef.current !== todayKey) {
+                        if (h === 17 && m === 50 && s === 0 && lastAutoUpdateRef.current !== todayKey) {
                             lastAutoUpdateRef.current = todayKey;
                             
                             const inRooms = rooms.filter(r => r.status === '입실').map(r => r.name).join(', ');
@@ -185,6 +203,9 @@
                 }, [rooms]);
 
                 const updateDb = async (col, id, fields) => {
+                    if (!user) return;
+                    
+                    // 낙관적 업데이트 (UI 즉시 반영)
                     if (col === 'rooms') {
                         setRooms(prev => prev.map(r => {
                             if (r.id !== id) return r;
@@ -202,17 +223,22 @@
                     } else {
                         setOutdoors(prev => prev.map(o => o.id === id ? { ...o, ...fields } : o));
                     }
-                    if (user) {
-                        try { await db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection(col).doc(id).update(fields); }
-                        catch (e) { console.error("Sync Error", e); }
+
+                    try {
+                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection(col).doc(id).update(fields);
+                    } catch (e) {
+                        console.error("Update Fail", e);
                     }
                 };
 
                 const updateMemoInDb = async (newContent) => {
+                    if (!user) return;
                     setDailyMemo(newContent);
-                    if (user) {
-                        const mRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('summaries').doc('daily_memo');
+                    try {
+                        const mRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('summaries').doc('daily_memo');
                         await mRef.set({ content: newContent }, { merge: true });
+                    } catch (e) {
+                        console.error("Memo Update Fail", e);
                     }
                 };
 
@@ -271,7 +297,7 @@
                 if (loading) return (
                     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-6">
                         <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p className="font-black tracking-widest uppercase text-xs">ROMHOUSE LOADING...</p>
+                        <p className="font-black tracking-widest uppercase text-xs">ROMHOUSE CONNECTING...</p>
                     </div>
                 );
 
@@ -325,7 +351,7 @@
                                 </div>
                             </section>
 
-                            {/* 일일 현황 메모장 (수정됨) */}
+                            {/* 일일 현황 메모장 */}
                             <section className="bg-slate-800 rounded-[24px] p-5 shadow-xl border-b-8 border-slate-900 mt-2 mb-20 relative z-10">
                                 <div className="flex justify-between items-center mb-3 px-1">
                                     <h2 className="text-white text-[12px] font-black uppercase tracking-widest flex items-center gap-2">
