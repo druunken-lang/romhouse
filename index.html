@@ -112,11 +112,10 @@
                 const [selId, setSelId] = useState(null);
                 const [loading, setLoading] = useState(true);
                 
-                const lastAutoUpdateRef = useRef(""); // 오늘 자동 업데이트 여부 체크용
+                const lastAutoUpdateRef = useRef(""); 
 
                 const activeRoom = useMemo(() => rooms.find(r => r.id === selId), [rooms, selId]);
 
-                // 1. 인증
                 useEffect(() => {
                     const timeout = setTimeout(() => setLoading(false), 3000);
                     auth.signInAnonymously().catch(() => setLoading(false));
@@ -124,7 +123,6 @@
                     return () => { unsub(); clearTimeout(timeout); };
                 }, []);
 
-                // 2. 실시간 데이터 구독
                 useEffect(() => {
                     if (!user) return;
                     const rRef = db.collection('artifacts').doc(FIXED_APP_ID).collection('public').doc('data').collection('rooms');
@@ -155,14 +153,14 @@
                         if (s.exists) {
                             setDailyMemo(s.data().content || "");
                         } else {
-                            setDoc(mRef, { content: "" });
+                            // Syntax error fixed: use .set() on the doc ref
+                            mRef.set({ content: "" });
                         }
                     });
 
                     return () => { unsubR(); unsubO(); unsubM(); };
                 }, [user]);
 
-                // 3. 오후 5시 50분 자동 현황 업데이트 로직
                 useEffect(() => {
                     const interval = setInterval(() => {
                         const now = new Date();
@@ -171,7 +169,6 @@
                         const seconds = now.getSeconds();
                         const todayKey = now.toDateString();
 
-                        // 17:50:00 에 딱 한 번 실행
                         if (hours === 17 && minutes === 50 && seconds === 0 && lastAutoUpdateRef.current !== todayKey) {
                             lastAutoUpdateRef.current = todayKey;
                             
@@ -328,8 +325,8 @@
                                 </div>
                             </section>
 
-                            {/* [신규] 일일 현황 메모장 (야외 체크리스트 하단) */}
-                            <section className="bg-slate-800 rounded-[24px] p-5 shadow-xl border-b-8 border-slate-900 mt-2 mb-10">
+                            {/* 일일 현황 메모장 (수정됨) */}
+                            <section className="bg-slate-800 rounded-[24px] p-5 shadow-xl border-b-8 border-slate-900 mt-2 mb-20 relative z-10">
                                 <div className="flex justify-between items-center mb-3 px-1">
                                     <h2 className="text-white text-[12px] font-black uppercase tracking-widest flex items-center gap-2">
                                         <SafeIcon name="clipboard-list" size={16} className="text-orange-500" /> 일일 현황 메모장
@@ -388,7 +385,10 @@
                                                     return (
                                                         <button 
                                                             key={key} 
-                                                            onClick={() => updateDb('rooms', activeRoom.id, { [`checklist.${key}`]: !isChecked })} 
+                                                            onClick={() => {
+                                                                const currentChecklist = activeRoom.checklist || {};
+                                                                updateDb('rooms', activeRoom.id, { [`checklist.${key}`]: !isChecked });
+                                                            }} 
                                                             className={`flex items-center gap-2 p-2.5 rounded-xl border-2 transition-all text-left active-scale ${isChecked ? 'bg-emerald-50 border-emerald-500 text-emerald-900' : 'bg-slate-50 border-slate-100 text-slate-300'}`}
                                                         >
                                                             <div className={`w-5 h-5 rounded-md flex items-center justify-center border-2 transition-all ${isChecked ? 'bg-emerald-600 border-emerald-600 shadow-sm' : 'bg-white border-slate-200'}`}>
